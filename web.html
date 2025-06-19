@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Desktop Agent UI</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts for Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- React & ReactDOM CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel CDN for JSX transformation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom scrollbar for message area */
+        .overflow-y-auto::-webkit-scrollbar {
+            width: 8px;
+        }
+        .overflow-y-auto::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .overflow-y-auto::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        // Main App component
+        const App = () => {
+            const [messages, setMessages] = useState([]);
+            const [command, setCommand] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const chatEndRef = useRef(null);
+
+            // Initial welcome message
+            useEffect(() => {
+                setMessages([
+                    { type: 'agent', text: "Welcome to the Desktop Agent UI! Type a command below." },
+                    { type: 'agent', text: "I can help with: listing files, creating files, reading files, moving/renaming, deleting files (including all files), and getting file info." }
+                ]);
+            }, []);
+
+            // Handle sending a command to the backend API
+            const handleSendCommand = async () => {
+                if (command.trim() === '') return;
+
+                const userCommand = command.trim();
+
+                // Add user command to messages
+                setMessages((prevMessages) => [
+                    ...prevMessages,
+                    { type: 'user', text: userCommand }
+                ]);
+
+                // Show "Thinking..." message
+                setMessages((prevMessages) => [
+                    ...prevMessages,
+                    { type: 'agent', text: 'Thinking...' }
+                ]);
+                setIsLoading(true);
+                setCommand(''); // Clear input immediately
+
+                try {
+                    // UPDATED PORT to 5001 to match api_server.py
+                    const response = await fetch('http://localhost:5001/command', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ command: userCommand }),
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    const agentResponse = data.response;
+
+                    setMessages((prevMessages) => {
+                        // Find and replace the "Thinking..." message with the actual response
+                        const updatedMessages = prevMessages.slice(0, -1); // Remove last "Thinking..."
+                        return [...updatedMessages, { type: 'agent', text: agentResponse }];
+                    });
+
+                } catch (error) {
+                    console.error("Error communicating with agent backend:", error);
+                    setMessages((prevMessages) => {
+                        const updatedMessages = prevMessages.slice(0, -1); // Remove last "Thinking..."
+                        return [...updatedMessages, { type: 'agent', text: `❌ Error: Could not connect to agent or received an error: ${error.message}` }];
+                    });
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            // Handle Enter key press
+            const handleKeyPress = (event) => {
+                if (event.key === 'Enter' && !isLoading) {
+                    handleSendCommand();
+                }
+            };
+
+            // Scroll to the bottom of messages when they update
+            useEffect(() => {
+                chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }, [messages]);
+
+            return (
+                <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4 font-sans antialiased">
+                    <div className="bg-white rounded-xl shadow-2xl overflow-hidden w-full max-w-2xl flex flex-col h-[80vh]">
+                        {/* Header */}
+                        <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 text-center text-xl font-bold rounded-t-xl shadow-md">
+                            Desktop Agent UI (Functional)
+                        </div>
+
+                        {/* Message Display Area */}
+                        <div className="flex-1 p-6 overflow-y-auto space-y-4">
+                            {messages.map((msg, index) => (
+                                <div
+                                    key={index}
+                                    className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                                >
+                                    <div
+                                        className={`p-3 rounded-xl shadow-sm max-w-[75%] whitespace-pre-wrap ${
+                                            msg.type === 'user'
+                                                ? 'bg-blue-500 text-white rounded-br-none'
+                                                : 'bg-gray-200 text-gray-800 rounded-bl-none'
+                                        }`}
+                                    >
+                                        {msg.text}
+                                    </div>
+                                </div>
+                            ))}
+                            <div ref={chatEndRef} /> {/* Scroll target */}
+                        </div>
+
+                        {/* Input Area */}
+                        <div className="border-t border-gray-200 p-4 bg-gray-50 flex items-center">
+                            <input
+                                type="text"
+                                value={command}
+                                onChange={(e) => setCommand(e.target.value)}
+                                onKeyPress={handleKeyPress}
+                                placeholder={isLoading ? "Agent is thinking..." : "Type your command..."}
+                                className="flex-1 p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-all duration-200"
+                                disabled={isLoading}
+                            />
+                            <button
+                                onClick={handleSendCommand}
+                                className={`ml-3 px-6 py-3 text-white rounded-xl shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 active:scale-95 ${
+                                    isLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                                }`}
+                                disabled={isLoading}
+                            >
+                                {isLoading ? 'Sending...' : 'Send'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Render the App component into the root div
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
